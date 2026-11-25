@@ -4,54 +4,61 @@
 #!author=qinglong
 #!tag=去广告
 #!
-#! 实测依据：2026-11-25 10:51 iPhone 冷启动 ChinaMobile/12.5.7 的 Surge 抓包
+#! 实测依据：2026-11-25 iPhone 冷启动 ChinaMobile/12.5.7 的 Surge 抓包
 #! 该版本已不再调用 DN/init/startInit，启动推广走 homepagePopup + toast 两条链路
-#! 需开启 MITM 并信任证书，否则 Map Local 不生效
+#! 需开启 MITM 并信任证书，否则规则不生效
 #!
-#! 为什么用 Map Local 而不是 URL Rewrite：
-#!   Surge 的 [URL Rewrite] 只支持 header / 302 / 307 / reject 四种类型，
-#!   reject-dict / reject-200 是 Loon/QuantumultX 的写法，Surge 会整条丢弃（静默失效）。
-#!   要「返回 {} 或空 200」必须用 [Map Local] 合成响应。
-#!
-#! 已知无法处理（AES-128-CBC 加密响应，改写需解密 + MD5 重签 r-token）：
-#!   DN/homePage/getTopAreaList(95KB)、DN/multipleInterfaces/aggregationData(45KB)、
-#!   DN/init/getNavigation(16KB) —— 首页大卡片广告都在这里面
+#! 版本标记（见 [Rule] 最后一条）：
+#!   在 Surge 的 /v1/rules 里能看到 coc-ads-probe.invalid 就说明本版已真正加载；
+#!   看不到 = 模块还停在旧版，通常是 raw.githubusercontent.com 拉取失败。
 
 [Rule]
-# QUIC 走 UDP，会绕过 MITM 让下面所有 Map Local 静默失效
+# 版本标记：只在 /v1/rules 里可见，不产生任何实际流量（.invalid 永不解析）
+DOMAIN,coc-ads-probe.invalid,REJECT
+
+# QUIC 走 UDP，会绕过 MITM 让下面所有规则静默失效
 AND,((DOMAIN,client.app.coc.10086.cn),(PROTOCOL,UDP)),REJECT
 AND,((DOMAIN,clientaccess.10086.cn),(PROTOCOL,UDP)),REJECT
 AND,((DOMAIN,app.10086.cn),(PROTOCOL,UDP)),REJECT
 AND,((DOMAIN,touch.10086.cn),(PROTOCOL,UDP)),REJECT
 AND,((DOMAIN,ad.mcloud.139.com),(PROTOCOL,UDP)),REJECT
 
-[Map Local]
-# ── 启动链路：本版本实测命中（12.5.7）────────────────────────────────
-# 首页弹窗推广排序 → 空字典，App 视为无弹窗，不阻塞启动
-^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/homepagePopup\/getSortInfo data-type=json data="{}" status-code=200
+[URL Rewrite]
+# 注意：Surge 的 URL Rewrite 只支持 header / 302 / 307 / reject 四种类型。
+# reject-dict、reject-200 是 Loon / QuantumultX 语法，写进来会被静默丢弃。
+# 占位符建议用官方文档的 `_`；`-` 在本仓库实测亦可，但以 `_` 为准。
 
+# ── 启动链路：12.5.7 实测命中 ────────────────────────────────────
+# 首页弹窗推广排序
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/homepagePopup\/getSortInfo _ reject
 # Toast 推广
-^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/toast\/getToastRule data-type=json data="{}" status-code=200
-^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DH\/toast\/august\/getToast data-type=json data="{}" status-code=200
-^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DH\/toast\/august\/getPages data-type=json data="{}" status-code=200
-
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/toast\/getToastRule _ reject
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DH\/toast\/august\/getToast _ reject
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DH\/toast\/august\/getPages _ reject
 # 福利位广告列表
-^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/welfareWidget\/getAdverList data-type=json data="{}" status-code=200
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/welfareWidget\/getAdverList _ reject
 
-# ── 开屏链路：12.5.7 未调用，老版本 / 灰度包仍会打，留着无害 ──────────
-# 返回 200 空体，App 判定为无广告
-^https?:\/\/(client\.app\.coc|app)\.10086\.cn\/biz-orange\/DN\/(explorePage\/getAdverList|init\/startInit|emotionMarket) data-type=text data="" status-code=200
+# ── 开屏链路：老版本 / 灰度包 / 缓存过期后仍会打 ──────────────────
+^https?:\/\/(client\.app\.coc|app)\.10086\.cn\/biz-orange\/DN\/(explorePage\/getAdverList|init\/startInit|emotionMarket) _ reject
 
-# ── 其它广告位 ────────────────────────────────────────────────────
-# 首页下拉广告
-^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/dropsAdverService\/getDropsAdverNew data-type=json data="{}" status-code=200
-# 直播悬浮位
-^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DA\/liveSuspension\/getPageCode data-type=json data="{}" status-code=200
+# ── 其它广告位 ──────────────────────────────────────────────────
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/dropsAdverService\/getDropsAdverNew _ reject
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DA\/liveSuspension\/getPageCode _ reject
 
-# 充值页弹窗（明文 JSON，把 data 置空）
+[Map Local]
+# 这两个接口必须保留 JSON 结构，不能直接 reject，否则 App 可能报错
+# 充值页弹窗：data 置空
 ^https?:\/\/touch\.10086\.cn\/i\/v1\/pay\/popWindowQry\/ data-type=json data="{\"data\":null}" status-code=200
-# 中国移动云 139 广告过滤接口（清空广告数组）
+# 中国移动云 139 广告过滤接口：清空广告数组
 ^https?:\/\/ad\.mcloud\.139\.com\/advertapi\/adv-filter\/adv-filter\/AdInfoFilter\/getAdInfos data-type=json data="{\"body\":[]}" status-code=200
 
+# ── 以下为候选规则，默认注释。确认开屏素材来源后按需开启 ────────────
+# 省级「预加载」素材（名字即 preloading，疑似开屏图）
+#^https?:\/\/[a-z0-9.-]+\.10086\.cn\/gmccfile\/file\/image\/preloading\d+\/ data-type=text data="" status-code=200
+# 首页欢迎页接口
+#^https?:\/\/[a-z0-9.-]+\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome\.do data-type=json data="{}" status-code=200
+# App 图片 CDN（fastdfs 路径）。风险：可能误伤首页正常配图
+#^https?:\/\/res\.app\.coc\.10086\.cn\/group\d\/M00\/[0-9]{2}\/[A-Z0-9]{2}\/.+\.jpg data-type=text data="" status-code=200
+
 [MITM]
-hostname = %APPEND% client.app.coc.10086.cn, clientaccess.10086.cn, app.10086.cn, touch.10086.cn, ad.mcloud.139.com
+hostname = %APPEND% client.app.coc.10086.cn, clientaccess.10086.cn, app.10086.cn, touch.10086.cn, ad.mcloud.139.com, res.app.coc.10086.cn
