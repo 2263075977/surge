@@ -16,12 +16,15 @@
 # 版本标记：只在 /v1/rules 里可见，不产生任何实际流量（.invalid 永不解析）
 DOMAIN,coc-ads-probe.invalid,REJECT
 
-# QUIC 走 UDP，会绕过 MITM 让下面所有规则静默失效
-AND,((DOMAIN,client.app.coc.10086.cn),(PROTOCOL,UDP)),REJECT
-AND,((DOMAIN,clientaccess.10086.cn),(PROTOCOL,UDP)),REJECT
-AND,((DOMAIN,app.10086.cn),(PROTOCOL,UDP)),REJECT
-AND,((DOMAIN,touch.10086.cn),(PROTOCOL,UDP)),REJECT
-AND,((DOMAIN,ad.mcloud.139.com),(PROTOCOL,UDP)),REJECT
+# QUIC 走 UDP，会绕过 MITM 让下面所有规则静默失效。
+# 实测：res.app.coc.10086.cn 在 DNS 缓存里有记录，但 HTTP 请求记录里从没出现过，
+# 说明开屏素材就是走 QUIC 拉取的。杀掉 QUIC 后它会回落到 TCP，才能被拦截。
+AND,((DOMAIN-SUFFIX,10086.cn),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN-SUFFIX,139.com),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN-SUFFIX,migu.cn),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN-SUFFIX,miguvideo.com),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN-SUFFIX,cmcc-cs.cn),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN-SUFFIX,online-cmcc.cn),(PROTOCOL,UDP)),REJECT
 
 [URL Rewrite]
 # 注意：Surge 的 URL Rewrite 只支持 header / 302 / 307 / reject 四种类型。
