@@ -1,0 +1,49 @@
+#!name=中国移动去广告
+#!desc=屏蔽中国移动 App（ChinaMobile 12.5.7 实测）启动弹窗 / Toast 推广 / 福利位广告 / 开屏接口，并阻断 QUIC 绕过 MITM
+#!system=ios
+#!author=qinglong
+#!tag=去广告
+#!
+#! 实测依据：2026-11-25 10:39:02 iPhone 冷启动 ChinaMobile/12.5.7 的 Surge 抓包
+#! 该版本已不再调用 DN/init/startInit，启动推广走 homepagePopup + toast 两条链路
+#! 需要：开启 MITM 并信任证书，否则 URL Rewrite 不生效
+#!
+#! 已知无法处理（加密响应，改写需 AES-128-CBC 解密 + MD5 重签 r-token）：
+#!   DN/homePage/getTopAreaList、DN/multipleInterfaces/aggregationData、
+#!   DN/init/getNavigation、S/我的/搜索热词/卡券/充值页 内容接口
+
+[Rule]
+# QUIC 走 UDP，会绕过 MITM 让下面所有路径级复写静默失效
+AND,((DOMAIN,client.app.coc.10086.cn),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN,clientaccess.10086.cn),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN,app.10086.cn),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN,touch.10086.cn),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN,ad.mcloud.139.com),(PROTOCOL,UDP)),REJECT
+
+[URL Rewrite]
+# ── 启动链路：本版本实测命中（ChinaMobile 12.5.7）────────────────────────
+# 首页弹窗推广排序（返回空字典 → App 视为无弹窗，不阻塞启动）
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/homepagePopup\/getSortInfo(\?.*)?$ - reject-dict
+# Toast 推广
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/toast\/getToastRule(\?.*)?$ - reject-dict
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DH\/toast\/august\/getToast(\?.*)?$ - reject-dict
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DH\/toast\/august\/getPages(\?.*)?$ - reject-dict
+# 福利位广告列表
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/welfareWidget\/getAdverList(\?.*)?$ - reject-dict
+
+# ── 开屏链路：本版本未调用，老版本 / 灰度包仍会打，留着无害 ──────────────
+# 社区验证写法：返回 200 空体，App 判定为无广告
+^https?:\/\/(client\.app\.coc|app)\.10086\.cn\/biz-orange\/DN\/(explorePage\/getAdverList|init\/startInit|emotionMarket) - reject-200
+
+# ── 其它广告位（首页下拉 / 直播悬浮）────────────────────────────────────
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DN\/dropsAdverService\/getDropsAdverNew(\?.*)?$ - reject-dict
+^https?:\/\/client\.app\.coc\.10086\.cn\/biz-orange\/DA\/liveSuspension\/getPageCode(\?.*)?$ - reject-dict
+
+[Map Local]
+# 充值页弹窗（明文 JSON，把 data 置空）
+^https?:\/\/touch\.10086\.cn\/i\/v1\/pay\/popWindowQry\/ data-type=text data="{\"data\":null}" status-code=200
+# 中国移动云 139 广告过滤接口（清空广告数组）
+^https?:\/\/ad\.mcloud\.139\.com\/advertapi\/adv-filter\/adv-filter\/AdInfoFilter\/getAdInfos data-type=text data="{\"body\":[]}" status-code=200
+
+[MITM]
+hostname = %APPEND% client.app.coc.10086.cn, clientaccess.10086.cn, app.10086.cn, touch.10086.cn, ad.mcloud.139.com
